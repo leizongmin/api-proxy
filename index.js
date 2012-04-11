@@ -14,6 +14,8 @@ var config = {
 
 http.globalAgent.maxSockets = config.MAX_SOCKETS;
 
+var requestCount = 0;
+
 var log = function (msg, isError) {
   var now = new Date();
   var time = now.toDateString() + ' ' + now.toLocaleTimeString();
@@ -27,6 +29,8 @@ var log = function (msg, isError) {
 http.createServer(function(req,res){
   var reqInfo = req.method + ' "' + req.url + '" ' + req.connection.remoteAddress;
   log('[Request]  ' + reqInfo);
+  
+  requestCount++;
 
   // 构造请求参数
   var urlInfo = url.parse(req.url);
@@ -43,7 +47,9 @@ http.createServer(function(req,res){
   var remoteReq = http.request(options, function (remoteRes) {
     log('[Response] ' + remoteRes.statusCode + ' ' + reqInfo);
     
-    res.writeHead(remoteRes.statusCode, remoteRes.headers);
+    var headers = remoteRes.headers;
+    headers['X-Request-Count'] = requestCount;
+    res.writeHead(remoteRes.statusCode, headers);
     remoteRes.on('data', function (chunk) {
       res.write(chunk);
     });
@@ -53,7 +59,7 @@ http.createServer(function(req,res){
   });
   
   remoteReq.on('error', function(err) { 
-    log(err, isError);
+    log(err, true);
   });
   
   remoteReq.end();
@@ -61,3 +67,7 @@ http.createServer(function(req,res){
 }).listen(config.SERVER_PORT);
 
 log('Server running on port ' + config.SERVER_PORT);
+
+process.on('uncaughtException', function (err) {
+  log(err, true);
+});
