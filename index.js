@@ -1,73 +1,55 @@
 var http = require('http');
 var url = require('url');
+var config = require('./config');
+var proxy = require('./proxy');
+var cache = require('./cache');
+var log = config.log;
+var error = config.error;
 
 
-// é…ç½®
-var config = {
-  MAX_SOCKETS:      10240,              // æœ€å¤§socketè¿æ¥æ•°
-  API_HOST:         '199.36.72.229',    // è¿œç¨‹æœåŠ¡å™¨IP
-  API_PORT:         8080,               // è¿œç¨‹æœåŠ¡å™¨ç«¯å£
-  API_TIMEOUT:      10000,              // è¯·æ±‚APIè¶…æ—¶ï¼ˆæ¯«ç§’ï¼‰
-  SERVER_PORT:      80                  // æœ¬åœ°æœåŠ¡å™¨ç«¯å£
-};
-
-
-http.globalAgent.maxSockets = config.MAX_SOCKETS;
-
+// ÇëÇó¼ÆÊı
 var requestCount = 0;
 
-var log = function (msg, isError) {
-  var now = new Date();
-  var time = now.toDateString() + ' ' + now.toLocaleTimeString();
-  if (isError)
-    console.error(time + ' -- ' + (msg.stack || msg));
-  else
-    console.log(time + ' -- ' + msg);
-}
-
-
-http.createServer(function(req,res){
+http.createServer(function (req, res) {
   var reqInfo = req.method + ' "' + req.url + '" ' + req.connection.remoteAddress;
-  log('[Request]  ' + reqInfo);
   
+  // Ö»Õë¶ÔGETºÍHEADÇëÇó½øĞĞ»º´æ
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    cache.get(req.url, function (err, data) {
+      if (err) {
+        proxy.request(req, res, function (err, data) {
+          cache.put(req.url, data, function (err) {
+            if (err)
+              return error(err);
+          });
+        });
+      }
+      else {
+        log('[cache]    ' + reqInfo);
+        proxy.response(res, data);
+      }
+    });
+  }
+  else {
+    proxy.request(req, res, function (err, data) {
+      // 
+    });
+  }
+  
+  // ÇåÀí»º´æ
   requestCount++;
-
-  // æ„é€ è¯·æ±‚å‚æ•°
-  var urlInfo = url.parse(req.url);
-  var options = {
-    host:       config.API_HOST,
-    hostname:   config.API_HOST,
-    port:       config.API_PORT,
-    method:     req.method,
-    path:       urlInfo.path,
-    Connection: 'keep-alive'
-  };
-  
-  // å‘é€è¯·æ±‚
-  var remoteReq = http.request(options, function (remoteRes) {
-    log('[Response] ' + remoteRes.statusCode + ' ' + reqInfo);
-    
-    var headers = remoteRes.headers;
-    headers['X-Request-Count'] = requestCount;
-    res.writeHead(remoteRes.statusCode, headers);
-    remoteRes.on('data', function (chunk) {
-      res.write(chunk);
+  if (requestCount % 2 === 200) {
+    log('clear cache...');
+    cache.clear(function (err) {
+      if (err)
+        error(err);
     });
-    remoteRes.on('end',function(){
-      res.end();
-    });
-  });
-  
-  remoteReq.on('error', function(err) { 
-    log(err, true);
-  });
-  
-  remoteReq.end();
+  } 
   
 }).listen(config.SERVER_PORT);
 
 log('Server running on port ' + config.SERVER_PORT);
 
 process.on('uncaughtException', function (err) {
-  log(err, true);
+  error(err);
 });
